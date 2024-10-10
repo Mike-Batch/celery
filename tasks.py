@@ -1,5 +1,6 @@
 import os
 from celery import Celery
+from celery.schedules import crontab
 from celery.utils.log import get_task_logger
 import assemblyai as aai
 import boto3
@@ -7,6 +8,14 @@ import psycopg2
 
 app = Celery('tasks', broker=os.getenv("CELERY_BROKER_URL"))
 logger = get_task_logger(__name__)
+
+# Configure Celery Beat to use the schedule
+app.conf.beat_schedule = {
+    'poll-transcription-jobs-every-5-mins': {
+        'task': 'tasks.check_for_new_jobs',
+        'schedule': crontab(minute='*/5'),  # Runs every 5 minutes
+    },
+}
 
 # AssemblyAI setup
 aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
@@ -29,6 +38,30 @@ def get_db_connection():
         port=os.getenv("DB_PORT")
     )
 
+# Periodic task to poll for new jobs
+@app.task
+def check_for_new_jobs():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Fetch pending jobs
+        cursor.execute("SELECT id FROM transcription_jobs WHERE status = 'pending'")
+        pending_jobs = cursor.fetchall()
+
+        for job_id, in pending_jobs:
+            # Trigger the transcription task for each pending job
+            process_transcription.delay(job_id)
+            logger.info(f"Triggered transcription task for job_id {job_id}")
+
+    except Exception as e:
+        logger.error(f"Error while polling for new jobs: {e}")
+
+    finally:
+        cursor.close()
+        conn.close()
+
+# Task to process a transcription job
 @app.task
 def process_transcription(job_id):
     conn = get_db_connection()
