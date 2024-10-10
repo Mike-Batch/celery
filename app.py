@@ -1,5 +1,5 @@
 import os
-from flask import Flask, flash, render_template, redirect, request, jsonify
+from flask import Flask, flash, redirect, request, jsonify
 from tasks import process_transcription
 import psycopg2
 
@@ -16,10 +16,6 @@ def get_db_connection():
         port=os.getenv("DB_PORT")
     )
 
-@app.route('/')
-def main():
-    return render_template('main.html')
-
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
     s3_audio_key = request.form.get('s3_audio_key')
@@ -27,7 +23,6 @@ def transcribe():
         flash("Audio file path is required.")
         return redirect('/')
 
-    # Insert job into the database
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -43,16 +38,13 @@ def transcribe():
         cursor.close()
         conn.close()
 
-        # Add the transcription job to the Celery queue
         process_transcription.delay(job_id)
 
-        flash(f"Your transcription job (ID: {job_id}) has been submitted.")
+        return jsonify({'message': f'Your transcription job (ID: {job_id}) has been submitted.'})
+
     except Exception as e:
-        flash(f"Error submitting job: {str(e)}")
+        return jsonify({'error': f'Error submitting job: {str(e)}'}), 500
 
-    return redirect('/')
-
-# Endpoint to check the status of a transcription job
 @app.route('/status/<int:job_id>', methods=['GET'])
 def get_status(job_id):
     try:
