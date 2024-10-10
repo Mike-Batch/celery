@@ -8,13 +8,14 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
 
 # Database connection
 def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT")
-    )
+    db_url = os.getenv("DB_URL")
+    return psycopg2.connect(db_url)
+    #     dbname=os.getenv("DB_NAME"),
+    #     user=os.getenv("DB_USER"),
+    #     password=os.getenv("DB_PASSWORD"),
+    #     host=os.getenv("DB_HOST"),
+    #     port=os.getenv("DB_PORT")
+    # )
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():

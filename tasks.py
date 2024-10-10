@@ -30,13 +30,14 @@ s3_client = boto3.client(
 
 # Database connection
 def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT")
-    )
+    db_url = os.getenv("DB_URL")
+    return psycopg2.connect(db_url)
+    #     dbname=os.getenv("DB_NAME"),
+    #     user=os.getenv("DB_USER"),
+    #     password=os.getenv("DB_PASSWORD"),
+    #     host=os.getenv("DB_HOST"),
+    #     port=os.getenv("DB_PORT")
+    # )
 
 # Periodic task to poll for new jobs
 @app.task
