@@ -11,9 +11,9 @@ logger = get_task_logger(__name__)
 
 # Configure Celery Beat to use the schedule
 app.conf.beat_schedule = {
-    'poll-transcription-jobs-every-5-mins': {
+    'poll-transcription-jobs-every-3-mins': {
         'task': 'tasks.check_for_new_jobs',
-        'schedule': crontab(minute='*/5'),  # Runs every 5 minutes
+        'schedule': crontab(minute='*/3'),  # Runs every 3 minute
     },
 }
 
