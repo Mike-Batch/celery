@@ -11,9 +11,9 @@ logger = get_task_logger(__name__)
 
 # Configure Celery Beat to use the schedule
 app.conf.beat_schedule = {
-    'poll-transcription-jobs-every-3-mins': {
+    'poll-transcription-jobs-every-1-mins': {
         'task': 'tasks.check_for_new_jobs',
-        'schedule': crontab(minute='*/3'),  # Runs every 3 minutes
+        'schedule': crontab(minute='*/1'),  # Runs every 1 minutes
     },
 }
 
@@ -113,7 +113,7 @@ def process_transcription(job_id):
         # Insert a new record in file_records with updated filepath for the transcribed file
         cursor.execute("""
             INSERT INTO file_records (clientid, programid, type, filepath, shorttext, description, personid, audienceid, interviewer, purpose, date, processing, sourceid)
-            SELECT clientid, programid, type, %s, shorttext, description, personid, audienceid, interviewer, purpose, date, 'Transcribed', sourceid
+            SELECT clientid, programid, type, %s, shorttext, description, personid, audienceid, interviewer, purpose, date, 'Awaiting_POV_Processing', sourceid
             FROM file_records WHERE id = %s
         """, (s3_output_key, fileid))
         conn.commit()
