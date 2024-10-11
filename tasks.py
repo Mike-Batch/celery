@@ -13,7 +13,7 @@ logger = get_task_logger(__name__)
 app.conf.beat_schedule = {
     'poll-transcription-jobs-every-3-mins': {
         'task': 'tasks.check_for_new_jobs',
-        'schedule': crontab(minute='*/3'),  # Runs every 3 minute
+        'schedule': crontab(minute='*/3'),  # Runs every 3 minutes
     },
 }
 
@@ -32,12 +32,6 @@ s3_client = boto3.client(
 def get_db_connection():
     db_url = os.getenv("DB_URL")
     return psycopg2.connect(db_url)
-    #     dbname=os.getenv("DB_NAME"),
-    #     user=os.getenv("DB_USER"),
-    #     password=os.getenv("DB_PASSWORD"),
-    #     host=os.getenv("DB_HOST"),
-    #     port=os.getenv("DB_PORT")
-    # )
 
 # Periodic task to poll for new jobs
 @app.task
@@ -69,15 +63,15 @@ def process_transcription(job_id):
     cursor = conn.cursor()
 
     try:
-        # Fetch the job details
-        cursor.execute("SELECT s3_audio_key FROM transcription_jobs WHERE id = %s AND status = 'pending'", (job_id,))
+        # Fetch the job details, including fileid
+        cursor.execute("SELECT s3_audio_key, fileid FROM transcription_jobs WHERE id = %s AND status = 'pending'", (job_id,))
         job = cursor.fetchone()
 
         if not job:
             logger.info(f"No pending job found for job_id {job_id}")
             return
 
-        s3_audio_key = job[0]
+        s3_audio_key, fileid = job
 
         # Update the job status to 'in_progress'
         cursor.execute("UPDATE transcription_jobs SET status = 'in_progress' WHERE id = %s", (job_id,))
@@ -110,6 +104,18 @@ def process_transcription(job_id):
 
         # Update job status to 'completed'
         cursor.execute("UPDATE transcription_jobs SET status = 'completed', updated_at = NOW() WHERE id = %s", (job_id,))
+        conn.commit()
+
+        # Update the processing status in file_records to 'Transcribed'
+        cursor.execute("UPDATE file_records SET processing = 'Transcribed' WHERE id = %s", (fileid,))
+        conn.commit()
+
+        # Insert a new record in file_records with updated filepath for the transcribed file
+        cursor.execute("""
+            INSERT INTO file_records (clientid, programid, type, filepath, shorttext, description, personid, audienceid, interviewer, purpose, date, processing, sourceid)
+            SELECT clientid, programid, type, %s, shorttext, description, personid, audienceid, interviewer, purpose, date, 'Transcribed', sourceid
+            FROM file_records WHERE id = %s
+        """, (s3_output_key, fileid))
         conn.commit()
 
         logger.info(f"Job {job_id} completed successfully, transcript saved to S3 at {s3_output_key}")
