@@ -5,6 +5,7 @@ from celery.utils.log import get_task_logger
 import assemblyai as aai
 import boto3
 import psycopg2
+from neo4j import GraphDatabase
 
 app = Celery('tasks', broker=os.getenv("CELERY_BROKER_URL"))
 logger = get_task_logger(__name__)
@@ -14,6 +15,11 @@ app.conf.beat_schedule = {
     'poll-transcription-jobs-every-1-mins': {
         'task': 'tasks.check_for_new_jobs',
         'schedule': crontab(minute='*/1'),  # Runs every 1 minutes
+    },
+    # Schedule the location sync task to run periodically, e.g., every 10 minutes
+    'sync-location-records-every-10-mins': {
+        'task': 'tasks.sync_location_records',
+        'schedule': crontab(minute='*/10'),  # Runs every 10 minutes
     },
 }
 
@@ -32,6 +38,107 @@ s3_client = boto3.client(
 def get_db_connection():
     db_url = os.getenv("DB_URL")
     return psycopg2.connect(db_url)
+
+
+def get_neo4j_connection():
+    uri = os.getenv("NEO4J_URI")
+    user = os.getenv("NEO4J_USER")
+    password = os.getenv("NEO4J_PASSWORD")
+    driver = GraphDatabase.driver(uri, auth=(user, password))
+    return driver
+
+
+# New task to sync location records
+@app.task
+def sync_location_records(batch_size=10):
+    # Establish database connections
+    conn = get_db_connection()
+    driver = get_neo4j_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Fetch a batch of unsynced locations with all required fields
+        cursor.execute("""
+            SELECT id, clientid, name, country, city, lat, long, functions, headcount, revenue, costs, margin 
+            FROM locations 
+            WHERE synced = FALSE 
+            LIMIT %s
+        """, (batch_size,))
+        unsynced_locations = cursor.fetchall()
+
+        if not unsynced_locations:
+            logger.info("No unsynced locations found.")
+            return
+
+        # Open Neo4j session
+        with driver.session() as session:
+            for location in unsynced_locations:
+                location_id, clientid, name, country, city, lat, long, functions, headcount, revenue, costs, margin = location
+
+                try:
+                    # Begin Neo4j transaction for each location
+                    with session.begin_transaction() as tx:
+                        # Create Location node with PGClient_ID and other properties (Neo4j auto-generates `id`)
+                        tx.run(
+                            """
+                            CREATE (l:Location {
+                                PGClient_ID: $clientid,
+                                name: $name,
+                                country: $country,
+                                city: $city,
+                                lat: $lat,
+                                long: $long,
+                                functions: $functions,
+                                headcount: $headcount,
+                                revenue: $revenue,
+                                costs: $costs,
+                                margin: $margin
+                            })
+                            """,
+                            clientid=clientid,
+                            name=name,
+                            country=country,
+                            city=city,
+                            lat=lat,
+                            long=long,
+                            functions=functions,
+                            headcount=headcount,
+                            revenue=revenue,
+                            costs=costs,
+                            margin=margin
+                        )
+                        logger.info(f"Location {name} created in Neo4j")
+
+                        # Create HAS_LOCATION relationship from Company node to Location node
+                        tx.run(
+                            """
+                            MATCH (c:Company {PGClient_ID: $clientid})
+                            MATCH (l:Location {PGClient_ID: $clientid, name: $name})
+                            CREATE (c)-[:HAS_LOCATION]->(l)
+                            """,
+                            clientid=clientid,
+                            name=name
+                        )
+                        logger.info(f"Created HAS_LOCATION relationship from Company {clientid} to Location")
+
+                    # Update the Postgres record to mark as synced
+                    cursor.execute("UPDATE locations SET synced = TRUE WHERE id = %s", (location_id,))
+                    conn.commit()
+
+                except Exception as e:
+                    # Log failure for this specific location without halting the batch process
+                    logger.error(f"Failed to sync location {name} (ID: {location_id}): {e}")
+                    conn.rollback()  # Rollback in case of an error with Postgres
+
+    except Exception as e:
+        logger.error(f"Error during sync_location_records execution: {e}")
+    finally:
+        # Close connections
+        cursor.close()
+        conn.close()
+        driver.close()
+
+
 
 # Periodic task to poll for new jobs
 @app.task

@@ -2,6 +2,7 @@ import os
 from flask import Flask, flash, redirect, request, jsonify
 from tasks import process_transcription
 import psycopg2
+from neo4j import GraphDatabase
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', "super-secret")
@@ -16,6 +17,14 @@ def get_db_connection():
     #     host=os.getenv("DB_HOST"),
     #     port=os.getenv("DB_PORT")
     # )
+
+def get_neo4j_connection():
+    uri = os.getenv("NEO4J_URI")
+    user = os.getenv("NEO4J_USER")
+    password = os.getenv("NEO4J_PASSWORD")
+    driver = GraphDatabase.driver(uri, auth=(user, password))
+    return driver
+
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():

@@ -34,3 +34,4 @@ zipp==3.8.0
 boto3
 psycopg2
 assemblyai
+neo4j
