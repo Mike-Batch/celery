@@ -17,9 +17,9 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/1'),  # Runs every 1 minutes
     },
     # Schedule the location sync task to run periodically, e.g., every 10 minutes
-    'sync-location-records-every-10-mins': {
+    'sync-location-records-every-1-mins': {
         'task': 'tasks.sync_location_records',
-        'schedule': crontab(minute='*/10'),  # Runs every 10 minutes
+        'schedule': crontab(minute='*/1'),  # Runs every 1# minutes
     },
 }
 
@@ -74,6 +74,12 @@ def sync_location_records(batch_size=10):
         with driver.session() as session:
             for location in unsynced_locations:
                 location_id, clientid, name, country, city, lat, long, functions, headcount, revenue, costs, margin = location
+
+                # Convert any decimal.Decimal values to float
+                headcount = int(headcount) if isinstance(headcount, decimal.Decimal) else headcount
+                revenue = float(revenue) if isinstance(revenue, decimal.Decimal) else revenue
+                costs = float(costs) if isinstance(costs, decimal.Decimal) else costs
+                margin = float(margin) if isinstance(margin, decimal.Decimal) else margin
 
                 try:
                     # Begin Neo4j transaction for each location
