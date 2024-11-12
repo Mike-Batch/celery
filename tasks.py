@@ -19,7 +19,7 @@ app.conf.beat_schedule = {
     # Schedule the location sync task to run periodically, e.g., every 10 minutes
     'sync-location-records-every-1-mins': {
         'task': 'tasks.sync_location_records',
-        'schedule': crontab(minute='*/1'),  # Runs every 1# minutes
+        'schedule': crontab(hour='*/3'),  # Runs every 3# hours
     },
 }
 
