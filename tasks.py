@@ -49,6 +49,8 @@ def get_neo4j_connection():
 
 
 # New task to sync location records
+import decimal
+
 @app.task
 def sync_location_records(batch_size=10):
     # Establish database connections
@@ -75,7 +77,9 @@ def sync_location_records(batch_size=10):
             for location in unsynced_locations:
                 location_id, clientid, name, country, city, lat, long, functions, headcount, revenue, costs, margin = location
 
-                # Convert any decimal.Decimal values to float
+                # Convert any decimal.Decimal values to float or int as needed
+                lat = float(lat) if isinstance(lat, decimal.Decimal) else lat
+                long = float(long) if isinstance(long, decimal.Decimal) else long
                 headcount = int(headcount) if isinstance(headcount, decimal.Decimal) else headcount
                 revenue = float(revenue) if isinstance(revenue, decimal.Decimal) else revenue
                 costs = float(costs) if isinstance(costs, decimal.Decimal) else costs
