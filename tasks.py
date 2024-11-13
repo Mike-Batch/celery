@@ -165,7 +165,8 @@ def sync_person_records(batch_size=10):
     try:
         # Fetch a batch of unsynced people records
         cursor.execute("""
-            SELECT id, firstname, lastname, jobtitle, transformationrole, email, clientid 
+            SELECT id, firstname, lastname, jobtitle, transformationrole, email, clientid, 
+                   firstlanguage, englishproficiency, locationid
             FROM people 
             WHERE synced = FALSE 
             LIMIT %s
@@ -179,12 +180,13 @@ def sync_person_records(batch_size=10):
         # Open Neo4j session
         with driver.session() as session:
             for person in unsynced_people:
-                person_id, firstname, lastname, jobtitle, transformationrole, email, clientid = person
+                (person_id, firstname, lastname, jobtitle, transformationrole, email, clientid,
+                 firstlanguage, englishproficiency, locationid) = person
 
                 try:
                     # Begin Neo4j transaction for each person
                     with session.begin_transaction() as tx:
-                        # Create Person node with properties
+                        # Create Person node with expanded properties
                         tx.run(
                             """
                             CREATE (p:Person {
@@ -193,7 +195,9 @@ def sync_person_records(batch_size=10):
                                 Job_Title: $jobtitle,
                                 Transformation_Role: $transformationrole,
                                 Email: $email,
-                                Person_ID: $person_id
+                                Person_ID: $person_id,
+                                First_Language: $firstlanguage,
+                                English_Proficiency: $englishproficiency
                             })
                             """,
                             firstname=firstname,
@@ -201,7 +205,9 @@ def sync_person_records(batch_size=10):
                             jobtitle=jobtitle,
                             transformationrole=transformationrole,
                             email=email,
-                            person_id=person_id
+                            person_id=person_id,
+                            firstlanguage=firstlanguage,
+                            englishproficiency=englishproficiency
                         )
                         logger.info(f"Person {firstname} {lastname} created in Neo4j")
 
@@ -216,6 +222,19 @@ def sync_person_records(batch_size=10):
                             person_id=person_id
                         )
                         logger.info(f"Created EMPLOYS relationship from Company {clientid} to Person {person_id}")
+
+                        # If locationid is present, create WORKS_AT relationship to Location node
+                        if locationid:
+                            tx.run(
+                                """
+                                MATCH (p:Person {Person_ID: $person_id})
+                                MATCH (l:Location {PGLocation_ID: $locationid})
+                                CREATE (p)-[:WORKS_AT]->(l)
+                                """,
+                                person_id=person_id,
+                                locationid=locationid
+                            )
+                            logger.info(f"Created WORKS_AT relationship from Person {person_id} to Location {locationid}")
 
                     # Update the Postgres record to mark as synced
                     cursor.execute("UPDATE people SET synced = TRUE WHERE id = %s", (person_id,))
