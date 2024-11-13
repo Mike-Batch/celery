@@ -17,9 +17,13 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/1'),  # Runs every 1 minutes
     },
     # Schedule the location sync task to run periodically, e.g., every 10 minutes
-    'sync-location-records-every-1-mins': {
+    'sync-location-records-every-3-hours': {
         'task': 'tasks.sync_location_records',
         'schedule': crontab(hour='*/3'),  # Runs every 3# hours
+    },
+    'sync-person-records-every-1-min': {
+        'task': 'tasks.sync_person_records',
+        'schedule': crontab(minute='*/1'),  # Adjust as needed
     },
 }
 
@@ -148,6 +152,87 @@ def sync_location_records(batch_size=10):
         conn.close()
         driver.close()
 
+
+# New task to sync people records
+
+@app.task
+def sync_person_records(batch_size=10):
+    # Establish database connections
+    conn = get_db_connection()
+    driver = get_neo4j_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Fetch a batch of unsynced people records
+        cursor.execute("""
+            SELECT id, firstname, lastname, jobtitle, transformationrole, email, clientid 
+            FROM people 
+            WHERE synced = FALSE 
+            LIMIT %s
+        """, (batch_size,))
+        unsynced_people = cursor.fetchall()
+
+        if not unsynced_people:
+            logger.info("No unsynced people found.")
+            return
+
+        # Open Neo4j session
+        with driver.session() as session:
+            for person in unsynced_people:
+                person_id, firstname, lastname, jobtitle, transformationrole, email, clientid = person
+
+                try:
+                    # Begin Neo4j transaction for each person
+                    with session.begin_transaction() as tx:
+                        # Create Person node with properties
+                        tx.run(
+                            """
+                            CREATE (p:Person {
+                                First_Name: $firstname,
+                                Last_Name: $lastname,
+                                Job_Title: $jobtitle,
+                                Transformation_Role: $transformationrole,
+                                Email: $email,
+                                Person_ID: $person_id
+                            })
+                            """,
+                            firstname=firstname,
+                            lastname=lastname,
+                            jobtitle=jobtitle,
+                            transformationrole=transformationrole,
+                            email=email,
+                            person_id=person_id
+                        )
+                        logger.info(f"Person {firstname} {lastname} created in Neo4j")
+
+                        # Create EMPLOYS relationship from Company node to Person node
+                        tx.run(
+                            """
+                            MATCH (c:Company {PGClient_ID: $clientid})
+                            MATCH (p:Person {Person_ID: $person_id})
+                            CREATE (c)-[:EMPLOYS]->(p)
+                            """,
+                            clientid=clientid,
+                            person_id=person_id
+                        )
+                        logger.info(f"Created EMPLOYS relationship from Company {clientid} to Person {person_id}")
+
+                    # Update the Postgres record to mark as synced
+                    cursor.execute("UPDATE people SET synced = TRUE WHERE id = %s", (person_id,))
+                    conn.commit()
+
+                except Exception as e:
+                    # Log failure for this specific person without halting the batch process
+                    logger.error(f"Failed to sync person {firstname} {lastname} (ID: {person_id}): {e}")
+                    conn.rollback()  # Rollback in case of an error with Postgres
+
+    except Exception as e:
+        logger.error(f"Error during sync_person_records execution: {e}")
+    finally:
+        # Close connections
+        cursor.close()
+        conn.close()
+        driver.close()
 
 
 # Periodic task to poll for new jobs
